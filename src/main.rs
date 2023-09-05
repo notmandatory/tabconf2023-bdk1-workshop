@@ -9,7 +9,7 @@ use bdk::bitcoin::secp256k1::{rand, rand::RngCore, Secp256k1};
 use bdk::bitcoin::{bip32, Address, OutPoint, ScriptBuf, Txid};
 
 use bdk::chain::keychain::WalletUpdate;
-use bdk::{bitcoin::Network, descriptor, KeychainKind, Wallet};
+use bdk::{bitcoin::Network, descriptor, FeeRate, KeychainKind, SignOptions, Wallet};
 
 use bdk::descriptor::IntoWalletDescriptor;
 use bdk::keys::IntoDescriptorKey;
@@ -23,6 +23,8 @@ const DB_MAGIC: &[u8] = "TABCONF24".as_bytes();
 
 const STOP_GAP: usize = 50;
 const PARALLEL_REQUESTS: usize = 5;
+
+const SEND_AMOUNT: u64 = 5000;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -301,6 +303,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let balance = wallet.get_balance();
         println!("Wallet balance after syncing: confirmed {} sats, trusted_pending {} sats, untrusted pending {} sats",
                  balance.confirmed, balance.trusted_pending, balance.untrusted_pending);
+    }
+
+    // Check balance and request deposit if required
+    if balance.total() < SEND_AMOUNT {
+        println!(
+            "Please send at least {} sats to {} using: https://signetfaucet.com/",
+            SEND_AMOUNT, address.address
+        );
+        std::process::exit(0);
+    }
+
+    // Create TX to return sats to signet faucet https://signetfaucet.com/
+    let faucet_address = Address::from_str("tb1qg3lau83hm9e9tdvzr5k7aqtw3uv0dwkfct4xdn")?
+        .require_network(network)?;
+
+    let mut tx_builder = wallet.build_tx();
+    tx_builder
+        .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
+        // .drain_to(faucet_address.script_pubkey())
+        // .drain_wallet()
+        .fee_rate(FeeRate::from_sat_per_vb(2.1))
+        .enable_rbf();
+
+    let mut psbt = tx_builder.finish()?;
+    let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
+    assert!(finalized);
+
+    let tx = psbt.extract_tx();
+    let (sent, received) = wallet.sent_and_received(&tx);
+    let fee = wallet.calculate_fee(&tx).expect("fee");
+    let fee_rate = wallet
+        .calculate_fee_rate(&tx)
+        .expect("fee rate")
+        .as_sat_per_vb();
+    println!(
+        "Created tx sending {} sats to {}",
+        sent - received - fee,
+        faucet_address
+    );
+    println!(
+        "Fee is {} sats, fee rate is {:.2} sats/vbyte",
+        fee, fee_rate
+    );
+
+    if prompt("Broadcast") {
+        client.broadcast(&tx).await?;
+        println!(
+            "Tx broadcast! https://mempool.space/signet/tx/{}",
+            tx.txid()
+        );
     }
 
     Ok(())
