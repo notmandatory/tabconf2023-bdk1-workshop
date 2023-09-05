@@ -1,23 +1,28 @@
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Read;
 use std::string::ToString;
-use std::{io::Write, str::FromStr};
+use std::{io, io::Write, str::FromStr};
 
 use bdk::bitcoin::bip32;
 use bdk::bitcoin::bip32::ExtendedPrivKey;
 use bdk::bitcoin::secp256k1::{rand, rand::RngCore, Secp256k1};
 
-use bdk::{bitcoin::Network, descriptor, Wallet};
+use bdk::chain::keychain::WalletUpdate;
+use bdk::{bitcoin::Network, descriptor, KeychainKind, Wallet};
 
 use bdk::descriptor::IntoWalletDescriptor;
 use bdk::keys::IntoDescriptorKey;
 use bdk::wallet::AddressIndex;
-use bdk_esplora::esplora_client;
+use bdk_esplora::{esplora_client, EsploraAsyncExt};
 use bdk_file_store::Store;
 
 const CONFIG_FILE: &str = "config.txt";
 const CHAIN_DATA_FILE: &str = "chain.dat";
 const DB_MAGIC: &[u8] = "TABCONF24".as_bytes();
+
+const STOP_GAP: usize = 50;
+const PARALLEL_REQUESTS: usize = 5;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -115,5 +120,81 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = esplora_client::Builder::new("http://signet.bitcoindevkit.net").build_async()?;
     let prev_tip = wallet.latest_checkpoint();
 
+    // Prepare the `IndexedTxGraph` update based on whether we are scanning or syncing.
+
+    // Scanning: We are iterating through spks of all keychains and scanning for transactions for
+    //   each spk. We start with the lowest derivation index spk and stop scanning after `stop_gap`
+    //   number of consecutive spks have no transaction history. A Scan is done in situations of
+    //   wallet restoration. It is a special case. Applications should use "sync" style updates
+    //   after an initial scan.
+    if prompt("Scan wallet") {
+        let keychain_spks = wallet
+            .spks_of_all_keychains()
+            .into_iter()
+            // This `map` is purely for logging.
+            .map(|(keychain, iter)| {
+                let mut first = true;
+                let spk_iter = iter.inspect(move |(i, _)| {
+                    if first {
+                        // TODO impl Display for Keychain
+                        eprint!(
+                            "\nscanning {}: ",
+                            match keychain {
+                                KeychainKind::External => "External",
+                                KeychainKind::Internal => "Internal",
+                            }
+                        );
+                        first = false;
+                    }
+                    eprint!("{} ", i);
+                    // Flush early to ensure we print at every iteration.
+                    let _ = io::stderr().flush();
+                });
+                (keychain, spk_iter)
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        // The client scans keychain spks for transaction histories, stopping after `stop_gap`
+        // is reached. It returns a `TxGraph` update (`graph_update`) and a structure that
+        // represents the last active spk derivation indices of keychains
+        // (`keychain_indices_update`).
+        let (graph_update, last_active_indices) = client
+            .update_tx_graph(
+                keychain_spks,
+                core::iter::empty(),
+                core::iter::empty(),
+                STOP_GAP,
+                PARALLEL_REQUESTS,
+            )
+            .await?;
+
+        println!();
+        let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
+        let chain_update = client
+            .update_local_chain(prev_tip.clone(), missing_heights)
+            .await?;
+
+        let update = WalletUpdate {
+            last_active_indices,
+            graph: graph_update,
+            chain: chain_update,
+        };
+        wallet.apply_update(update)?;
+        wallet.commit()?;
+        println!("Scan completed.");
+
+        let balance = wallet.get_balance();
+        println!("Wallet balance after scanning: confirmed {} sats, trusted_pending {} sats, untrusted pending {} sats",
+                 balance.confirmed, balance.trusted_pending, balance.untrusted_pending);
+    }
+
     Ok(())
+}
+
+fn prompt(question: &str) -> bool {
+    print!("{}? (Y/N) ", question);
+    std::io::stdout().flush().expect("stdout flush");
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer).expect("answer");
+    answer.trim().to_ascii_lowercase() == "y"
 }
