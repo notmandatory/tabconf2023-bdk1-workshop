@@ -245,6 +245,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             spks = Box::new(unused_spks);
         }
 
+        // Sync UTXOs
+        if prompt("Sync UTXOs") {
+            // We want to search for whether the UTXO is spent, and spent by which
+            // transaction. We provide the outpoint of the UTXO to
+            // `EsploraExt::update_tx_graph_without_keychain`.
+            let utxo_outpoints = wallet
+                .list_unspent()
+                .inspect(|utxo| {
+                    eprintln!(
+                        "Checking if outpoint {} (value: {}) has been spent",
+                        utxo.outpoint, utxo.txout.value
+                    );
+                    // Flush early to ensure we print at every iteration.
+                    let _ = io::stderr().flush();
+                })
+                .map(|utxo| utxo.outpoint);
+            outpoints = Box::new(utxo_outpoints);
+        };
+
+        // Sync unconfirmed TX
+        if prompt("Sync unconfirmed TX") {
+            // We want to search for whether the unconfirmed transaction is now confirmed.
+            // We provide the unconfirmed txids to
+            // `EsploraExt::update_tx_graph_without_keychain`.
+            let unconfirmed_txids = wallet
+                .transactions()
+                .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
+                .map(|canonical_tx| canonical_tx.tx_node.txid)
+                .inspect(|txid| {
+                    eprintln!("Checking if {} is confirmed yet", txid);
+                    // Flush early to ensure we print at every iteration.
+                    let _ = io::stderr().flush();
+                });
+            txids = Box::new(unconfirmed_txids);
+        }
+
         let graph_update = client
             .update_tx_graph_without_keychain(spks.into_iter(), txids, outpoints, PARALLEL_REQUESTS)
             .await?;
