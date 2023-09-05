@@ -4,9 +4,9 @@ use std::io::Read;
 use std::string::ToString;
 use std::{io, io::Write, str::FromStr};
 
-use bdk::bitcoin::bip32;
 use bdk::bitcoin::bip32::ExtendedPrivKey;
 use bdk::bitcoin::secp256k1::{rand, rand::RngCore, Secp256k1};
+use bdk::bitcoin::{bip32, Address, OutPoint, ScriptBuf, Txid};
 
 use bdk::chain::keychain::WalletUpdate;
 use bdk::{bitcoin::Network, descriptor, KeychainKind, Wallet};
@@ -185,6 +185,61 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let balance = wallet.get_balance();
         println!("Wallet balance after scanning: confirmed {} sats, trusted_pending {} sats, untrusted pending {} sats",
+                 balance.confirmed, balance.trusted_pending, balance.untrusted_pending);
+    }
+    // Syncing: We only check for specified spks, utxos and txids to update their confirmation
+    //   status or fetch missing transactions.
+    else {
+        // Spks, outpoints and txids we want updates on will be accumulated here.
+        let mut spks: Box<Vec<ScriptBuf>> = Box::new(Vec::new());
+        let mut outpoints: Box<dyn Iterator<Item = OutPoint> + Send> =
+            Box::new(core::iter::empty());
+        let mut txids: Box<dyn Iterator<Item = Txid> + Send> = Box::new(core::iter::empty());
+
+        // Sync all SPKs
+        if prompt("Sync all SPKs") {
+            // TODO add Wallet::all_spks() function, gives all tracked spks
+            let all_spks: Vec<ScriptBuf> = wallet
+                .spk_index()
+                .all_spks()
+                .into_iter()
+                .map(|((keychain, index), script)| {
+                    eprintln!(
+                        "Checking if keychain: {}, index: {}, address: {} has been used",
+                        match keychain {
+                            KeychainKind::External => "External",
+                            KeychainKind::Internal => "Internal",
+                        },
+                        index,
+                        Address::from_script(script.as_script(), network).unwrap(),
+                    );
+                    // Flush early to ensure we print at every iteration.
+                    let _ = io::stderr().flush();
+                    (*script).clone()
+                })
+                .collect();
+            spks = Box::new(all_spks);
+        }
+
+        let graph_update = client
+            .update_tx_graph_without_keychain(spks.into_iter(), txids, outpoints, PARALLEL_REQUESTS)
+            .await?;
+
+        let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
+        let chain_update = client.update_local_chain(prev_tip, missing_heights).await?;
+
+        let update = WalletUpdate {
+            // no update to active indices
+            last_active_indices: BTreeMap::new(),
+            graph: graph_update,
+            chain: chain_update,
+        };
+        wallet.apply_update(update)?;
+        wallet.commit()?;
+        println!("Sync completed.");
+
+        let balance = wallet.get_balance();
+        println!("Wallet balance after syncing: confirmed {} sats, trusted_pending {} sats, untrusted pending {} sats",
                  balance.confirmed, balance.trusted_pending, balance.untrusted_pending);
     }
 
