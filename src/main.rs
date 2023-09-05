@@ -30,6 +30,8 @@ const DB_MAGIC: &[u8] = "TABCONF24".as_bytes();
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create and load or save new descriptors
+
     let secp = Secp256k1::new();
     let network = Network::Signet;
 
@@ -102,6 +104,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .to_string_with_secret(&internal_descriptor.1)
     );
 
+    // Create a wallet and get a new address and current wallet balance
+
     let db = Store::<bdk::wallet::ChangeSet>::new_from_path(DB_MAGIC, CHAIN_DATA_FILE)?;
     // let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     // let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
@@ -116,6 +120,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get the wallet balance before syncing
     let balance = wallet.get_balance();
     println!("Wallet balance before syncing: confirmed {} sats, trusted_pending {} sats, untrusted pending {} sats", balance.confirmed, balance.trusted_pending, balance.untrusted_pending);
+
+    // Create an async esplora client
 
     let client = esplora_client::Builder::new("http://signet.bitcoindevkit.net").build_async()?;
     let prev_tip = wallet.latest_checkpoint();
@@ -196,6 +202,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Box::new(core::iter::empty());
         let mut txids: Box<dyn Iterator<Item = Txid> + Send> = Box::new(core::iter::empty());
 
+        // Sync all SPKs
+
         if prompt("Sync all SPKs") {
             // TODO add Wallet::all_spks() function, gives all tracked spks
             let all_spks: Vec<ScriptBuf> = wallet
@@ -218,7 +226,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .collect();
             spks = Box::new(all_spks);
-        } else if prompt("Sync only unused SPKs") {
+        }
+        // Sync only unused SPKs
+        else if prompt("Sync only unused SPKs") {
             // TODO add Wallet::unused_spks() function, gives all unused tracked spks
             let unused_spks: Vec<ScriptBuf> = wallet
                 .spk_index()
@@ -241,6 +251,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .collect();
             spks = Box::new(unused_spks);
         }
+
+        // Sync UTXOs
+
         if prompt("Sync UTXOs") {
             // We want to search for whether the UTXO is spent, and spent by which
             // transaction. We provide the outpoint of the UTXO to
@@ -258,6 +271,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|utxo| utxo.outpoint);
             outpoints = Box::new(utxo_outpoints);
         };
+
+        // Sync unconfirmed TX
+
         if prompt("Sync unconfirmed TX") {
             // We want to search for whether the unconfirmed transaction is now confirmed.
             // We provide the unconfirmed txids to
@@ -296,6 +312,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                  balance.confirmed, balance.trusted_pending, balance.untrusted_pending);
     }
 
+    // Check balance and request deposit if required
+
     if balance.total() < SEND_AMOUNT {
         println!(
             "Please send at least {} sats to {} using: https://signetfaucet.com/",
@@ -304,7 +322,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(0);
     }
 
-    // returns sats to https://signetfaucet.com/
+    // Create TX to return sats to signet faucet https://signetfaucet.com/
+
     let faucet_address = Address::from_str("tb1qg3lau83hm9e9tdvzr5k7aqtw3uv0dwkfct4xdn")?
         .require_network(network)?;
 
@@ -337,8 +356,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fee, fee_rate
     );
 
-    let broadcast = prompt("Broadcast");
-    if broadcast {
+    if prompt("Broadcast") {
         client.broadcast(&tx).await?;
         println!(
             "Tx broadcast! https://mempool.space/signet/tx/{}",
