@@ -7,12 +7,16 @@ use bdk::bitcoin::bip32;
 use bdk::bitcoin::bip32::ExtendedPrivKey;
 use bdk::bitcoin::secp256k1::{rand, rand::RngCore, Secp256k1};
 
-use bdk::{bitcoin::Network, descriptor};
+use bdk::{bitcoin::Network, descriptor, Wallet};
 
 use bdk::descriptor::IntoWalletDescriptor;
 use bdk::keys::IntoDescriptorKey;
+use bdk::wallet::AddressIndex;
+use bdk_file_store::Store;
 
 const CONFIG_FILE: &str = "config.txt";
+const CHAIN_DATA_FILE: &str = "chain.dat";
+const DB_MAGIC: &[u8] = "TABCONF24".as_bytes();
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -89,6 +93,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .0
             .to_string_with_secret(&internal_descriptor.1)
     );
+
+    // Create a wallet and get a new address and current wallet balance
+
+    let db = Store::<bdk::wallet::ChangeSet>::new_from_path(DB_MAGIC, CHAIN_DATA_FILE)?;
+
+    // Create a new wallet
+    let mut wallet = Wallet::new(external_descriptor, Some(internal_descriptor), db, network)?;
+
+    // Get a new wallet address
+    let address = wallet.get_address(AddressIndex::New);
+    println!("Generated Address: {:?}", address);
+
+    // Get the wallet balance before syncing
+    let balance = wallet.get_balance();
+    println!("Wallet balance before syncing: confirmed {} sats, trusted_pending {} sats, untrusted pending {} sats", balance.confirmed, balance.trusted_pending, balance.untrusted_pending);
 
     Ok(())
 }
