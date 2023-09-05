@@ -1,0 +1,13 @@
+[package]
+name = "my_bdk_app"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bdk = { git = "https://github.com/notmandatory/bdk.git", branch = "test/esplora_tests" }
+bdk_esplora = { git = "https://github.com/notmandatory/bdk.git", branch = "test/esplora_tests" }
+bdk_file_store = { git = "https://github.com/notmandatory/bdk.git", branch = "test/esplora_tests" }
+
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
