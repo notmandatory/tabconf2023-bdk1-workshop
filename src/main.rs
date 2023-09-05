@@ -220,6 +220,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .collect();
             spks = Box::new(all_spks);
         }
+        // Sync only unused SPKs
+        else if prompt("Sync only unused SPKs") {
+            // TODO add Wallet::unused_spks() function, gives all unused tracked spks
+            let unused_spks: Vec<ScriptBuf> = wallet
+                .spk_index()
+                .unused_spks(..)
+                .into_iter()
+                .map(|((keychain, index), script)| {
+                    eprintln!(
+                        "Checking if keychain: {}, index: {}, address: {} has been used",
+                        match keychain {
+                            KeychainKind::External => "External",
+                            KeychainKind::Internal => "Internal",
+                        },
+                        index,
+                        Address::from_script(script, network).unwrap(),
+                    );
+                    // Flush early to ensure we print at every iteration.
+                    let _ = io::stderr().flush();
+                    ScriptBuf::from(script)
+                })
+                .collect();
+            spks = Box::new(unused_spks);
+        }
 
         let graph_update = client
             .update_tx_graph_without_keychain(spks.into_iter(), txids, outpoints, PARALLEL_REQUESTS)
