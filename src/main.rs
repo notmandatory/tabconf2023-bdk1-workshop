@@ -12,6 +12,7 @@ use bdk::{bitcoin::Network, descriptor, Wallet};
 use bdk::descriptor::IntoWalletDescriptor;
 use bdk::keys::IntoDescriptorKey;
 use bdk::wallet::AddressIndex;
+use bdk_esplora::esplora_client;
 use bdk_file_store::Store;
 
 const CONFIG_FILE: &str = "config.txt";
@@ -108,6 +109,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get the wallet balance before syncing
     let balance = wallet.get_balance();
     println!("Wallet balance before syncing: confirmed {} sats, trusted_pending {} sats, untrusted pending {} sats", balance.confirmed, balance.trusted_pending, balance.untrusted_pending);
+
+    // Create an async esplora client
+
+    let client = esplora_client::Builder::new("http://signet.bitcoindevkit.net").build_async()?;
+    let prev_tip = wallet.latest_checkpoint();
 
     Ok(())
 }
