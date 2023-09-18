@@ -161,7 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // represents the last active spk derivation indices of keychains
         // (`keychain_indices_update`).
         let (graph_update, last_active_indices) = client
-            .update_tx_graph(
+            .scan_txs_with_keychains(
                 keychain_spks,
                 core::iter::empty(),
                 core::iter::empty(),
@@ -284,7 +284,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let graph_update = client
-            .update_tx_graph_without_keychain(spks.into_iter(), txids, outpoints, PARALLEL_REQUESTS)
+            .scan_txs(spks.into_iter(), txids, outpoints, PARALLEL_REQUESTS)
             .await?;
 
         let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
