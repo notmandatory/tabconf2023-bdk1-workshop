@@ -8,12 +8,11 @@ use bdk::bitcoin::bip32::ExtendedPrivKey;
 use bdk::bitcoin::secp256k1::{rand, rand::RngCore, Secp256k1};
 use bdk::bitcoin::{bip32, Address, OutPoint, ScriptBuf, Txid};
 
-use bdk::chain::keychain::WalletUpdate;
 use bdk::{bitcoin::Network, descriptor, FeeRate, KeychainKind, SignOptions, Wallet};
 
 use bdk::descriptor::IntoWalletDescriptor;
 use bdk::keys::IntoDescriptorKey;
-use bdk::wallet::AddressIndex;
+use bdk::wallet::{AddressIndex, Update};
 use bdk_esplora::{esplora_client, EsploraAsyncExt};
 use bdk_file_store::Store;
 
@@ -176,10 +175,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .update_local_chain(prev_tip.clone(), missing_heights)
             .await?;
 
-        let update = WalletUpdate {
+        let update = Update {
             last_active_indices,
             graph: graph_update,
-            chain: chain_update,
+            chain: Some(chain_update),
         };
         wallet.apply_update(update)?;
         wallet.commit()?;
@@ -290,11 +289,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
         let chain_update = client.update_local_chain(prev_tip, missing_heights).await?;
 
-        let update = WalletUpdate {
+        let update = Update {
             // no update to active indices
             last_active_indices: BTreeMap::new(),
             graph: graph_update,
-            chain: chain_update,
+            chain: Some(chain_update),
         };
         wallet.apply_update(update)?;
         wallet.commit()?;
