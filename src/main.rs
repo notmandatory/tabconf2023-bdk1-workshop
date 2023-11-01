@@ -170,7 +170,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await?;
 
         println!();
-        let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
+        let missing_heights = graph_update.missing_heights(wallet.local_chain());
         let chain_update = client
             .update_local_chain(prev_tip.clone(), missing_heights)
             .await?;
@@ -286,7 +286,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .scan_txs(spks.into_iter(), txids, outpoints, PARALLEL_REQUESTS)
             .await?;
 
-        let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
+        let missing_heights = graph_update.missing_heights(wallet.local_chain());
         let chain_update = client.update_local_chain(prev_tip, missing_heights).await?;
 
         let update = Update {
